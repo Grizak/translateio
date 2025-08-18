@@ -1,0 +1,37 @@
+{
+  "name": "@translateio/backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/bundle.js",
+  "scripts": {
+    "build": "webpack --mode production",
+    "dev": "nodemon --exec tsx src/index.ts --watch src --ext ts,json,js",
+    "watch": "webpack --mode development --watch",
+    "serve": "webpack serve --mode development",
+    "clean": "rimraf dist",
+    "test": "nodemon --exec tsx ../testing/test.ts --watch src --watch ../testing --ext ts,json,js"
+  },
+  "keywords": [],
+  "author": "Isak Grönlund <gronlundisak11@gmail.com>",
+  "license": "MIT",
+  "packageManager": "pnpm@10.14.0",
+  "devDependencies": {
+    "@types/node": "^24.2.1",
+    "nodemon": "^3.1.10",
+    "rimraf": "^6.0.1",
+    "terser-webpack-plugin": "^5.3.14",
+    "ts-loader": "^9.5.2",
+    "tsx": "^4.20.4",
+    "typescript": "^5.9.2",
+    "webpack": "^5.101.1",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.2"
+  },
+  "dependencies": {
+    "@translateio/shared": "^1.0.1",
+    "@types/express": "^5.0.3",
+    "axios": "^1.11.0",
+    "express": "^5.1.0",
+    "nodeloggerg": "^4.3.2"
+  }
+}

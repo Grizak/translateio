@@ -1,0 +1,31 @@
+{
+  "name": "@translateio/shared",
+  "version": "1.0.1",
+  "description": "A shared package for TranslateIO containing common types and utilities.",
+  "main": "index.js",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "translateio",
+    "shared",
+    "utilities",
+    "types"
+  ],
+  "author": "Isak Grönlund <gronlundisak11@gmail.com>",
+  "license": "MIT",
+  "packageManager": "pnpm@10.14.0",
+  "type": "module",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "languageNames.json",
+    "package.json",
+    "README.md"
+  ]
+}
