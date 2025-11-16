@@ -44,17 +44,4 @@ module.exports = {
   },
 
   mode: "production",
-
-  // Optional: Add source maps for debugging
-  devtool: "source-map",
-
-  // Development server configuration (optional)
-  devServer: {
-    static: {
-      directory: path.join(__dirname, "dist"),
-    },
-    compress: true,
-    port: 9000,
-    open: true,
-  },
 };
