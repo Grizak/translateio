@@ -3,6 +3,8 @@ import fs from "fs";
 import nodeloggerg from "nodeloggerg";
 import express from "express";
 import axios from "axios";
+import http from "http";
+import bcrypt from "bcrypt";
 
 const logger = nodeloggerg({
   serverConfig: {
@@ -138,6 +140,11 @@ interface TranslateIoBackendOptions {
      * @default 30
      */
     batchSize?: number;
+    /**
+     * Post-processing function to apply to the translation data after receiving it from the translation service.
+     * This can be used to format or clean up the translated text.
+     */
+    postProcessing: (data: any) => Array<{ key: string; value: string }>;
   };
 }
 
@@ -235,39 +242,109 @@ interface TranslateIoBackendConfig {
     /**
      * Post-processing function
      */
-    postProcessing?: (data: any) => [
-      {
-        key: string;
-        value: string;
-      }
-    ]; // Post-processing function
+    postProcessing: (data: any) => Array<{ key: string; value: string }>; // Post-processing function
   };
 }
 
-interface TranslateIoBackendReturn {}
+interface TranslateIoBackendReturn {
+  start: () => void;
+  stop: () => void;
+}
 
 interface TranslationService {
   translate: (
-    translations: object[],
+    translations: Record<string, string> | Record<string, string>[],
     targetLanguage: string
-  ) => Promise<string>;
+  ) => Promise<Record<string, string>>;
   getMetadata: (language: string) => Promise<object[]>;
   setMetadata: (language: string, metadata: object[]) => Promise<void>;
 }
+
+// --- Auth Middleware ---
+const basicAuthMiddleware =
+  (username: string, hashedPassword: string) =>
+  async (
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+  ) => {
+    const auth = req.headers.authorization;
+
+    if (!auth || !auth.startsWith("Basic ")) {
+      res.setHeader("WWW-Authenticate", 'Basic realm="Translate.io"');
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    try {
+      const base64Credentials = auth.split(" ")[1];
+      const decoded = Buffer.from(base64Credentials, "base64").toString(
+        "utf-8"
+      );
+      const [inputUser, inputPass] = decoded.split(":");
+
+      const passwordMatch = await bcrypt.compare(inputPass, hashedPassword);
+
+      if (inputUser !== username || !passwordMatch) {
+        res.setHeader("WWW-Authenticate", 'Basic realm="Translate.io"');
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      next();
+    } catch (err) {
+      return res
+        .status(400)
+        .json({ error: "Invalid Authorization header format" });
+    }
+  };
 
 function createTranslationService(
   config: TranslateIoBackendConfig
 ): TranslationService {
   return {
-    translate: async (translations: object[], targetLanguage: string) => {
-      const response = await axios(config.translationService.url, {
-        headers: config.translationService.headers,
-        timeout: config.translationService.timeout,
-        method: config.translationService.method,
-        data: config.translationService.payload(translations, targetLanguage),
-      });
-      return response.data;
+    translate: async (
+      translations: Record<string, string> | Record<string, string>[],
+      targetLanguage: string
+    ): Promise<Record<string, string>> => {
+      try {
+        // Normalize input to array of records
+        const inputArray = Array.isArray(translations)
+          ? translations
+          : [translations];
+
+        // Build payload through user-defined payload fn
+        const payload = config.translationService.payload(
+          inputArray,
+          targetLanguage
+        );
+
+        const response = await axios({
+          url: config.translationService.url,
+          method: config.translationService.method,
+          headers: config.translationService.headers,
+          timeout: config.translationService.timeout,
+          data: payload,
+        });
+
+        // Ensure postProcessing returns proper structure
+        const processed: { key: string; value: string }[] =
+          config.translationService.postProcessing(response.data);
+
+        // Convert array of { key, value } → Record<string, string>
+        return processed.reduce<Record<string, string>>(
+          (acc, { key, value }) => {
+            acc[key] = value;
+            return acc;
+          },
+          {}
+        );
+      } catch (error: any) {
+        // Add better error context
+        throw new Error(
+          `Translation request failed: ${error.message ?? error.toString()}`
+        );
+      }
     },
+
     getMetadata: async (language: string): Promise<object[]> => {
       const metadata = await fs.promises.readFile(
         `${config.translations.outputDirectory}/${language}.metadata.json`,
@@ -275,6 +352,7 @@ function createTranslationService(
       );
       return JSON.parse(metadata);
     },
+
     setMetadata: async (
       language: string,
       metadata: object[]
@@ -287,16 +365,58 @@ function createTranslationService(
   };
 }
 
+async function translateWithBatching(
+  data: Record<string, string>,
+  toLanguage: string,
+  config: TranslateIoBackendConfig
+): Promise<Record<string, string>> {
+  const service = createTranslationService(config);
+
+  if (config.translationService.batchProcessing) {
+    // --- Batch processing ---
+    const entries = Object.entries(data);
+    const results: Record<string, string> = {};
+
+    for (
+      let i = 0;
+      i < entries.length;
+      i += config.translationService.batchSize
+    ) {
+      const batch = entries.slice(i, i + config.translationService.batchSize);
+
+      // Prepare payload as array of objects
+      const batchData = batch.map(([key, value]) => ({ key, value }));
+
+      const response = await service.translate(batchData, toLanguage);
+      // `service.translate` already returns Record<string,string>
+      Object.assign(results, response);
+    }
+
+    return results;
+  } else {
+    // --- Singular processing ---
+    const results: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(data)) {
+      const response = await service.translate({ [key]: value }, toLanguage);
+      Object.assign(results, response);
+    }
+
+    return results;
+  }
+}
+
 function createTranslateIoBackend(
   options: TranslateIoBackendOptions
 ): TranslateIoBackendReturn {
+  let server: http.Server | undefined;
   const config: TranslateIoBackendConfig = {
     server: {
       port: options.server.port || 4545, // Default port if not provided
       // Ensure that the auth object is always present
       auth: {
         username: options.server.auth.username || "admin",
-        password: options.server.auth.password || "admin",
+        password: bcrypt.hashSync(options.server.auth.password || "admin", 10),
       },
     },
     translations: {
@@ -321,6 +441,7 @@ function createTranslateIoBackend(
       payload: options.translationService.payload,
       batchProcessing: options.translationService.batchProcessing,
       batchSize: options.translationService.batchSize || 30, // Default batch size
+      postProcessing: options.translationService.postProcessing,
     },
   };
   try {
@@ -398,14 +519,23 @@ function createTranslateIoBackend(
   }
 
   const app = express();
-
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  app.get("/", (req, res) => {
-    res.send("Translate.io Backend is running.");
-  });
+  // Public endpoint
+  app.get("/", (req, res) => res.send("Translate.io Backend is running."));
 
+  // Apply auth middleware to all protected endpoints
+  const authMiddleware = basicAuthMiddleware(
+    config.server.auth.username,
+    config.server.auth.password
+  );
+
+  app.use("/languages", authMiddleware);
+  app.use("/languageMapping", authMiddleware);
+  app.use("/translate", authMiddleware);
+
+  // Languages endpoints
   app.get("/languages", (req, res) => {
     res.json({
       languages: config.translations.languages,
@@ -413,7 +543,16 @@ function createTranslateIoBackend(
     });
   });
 
-  // Load translations from the specified file
+  app.get("/languageMapping/:language", (req, res) => {
+    const { language } = req.params;
+    const mappedLanguage =
+      languageNames[language as keyof typeof languageNames];
+    if (!mappedLanguage)
+      return res.status(404).json({ error: "Language not found." });
+    res.json({ language: mappedLanguage });
+  });
+
+  // Load translations
   let toTranslate: Record<string, string> = {};
   try {
     const data = fs.readFileSync(config.translations.fromFile, "utf-8");
@@ -423,44 +562,26 @@ function createTranslateIoBackend(
     throw error;
   }
 
-  // Initialize the translation service
-  const translationService = createTranslationService(config);
-
-  async function handleTranslationRequest(
-    toLanguage: string,
-    toTranslate: Record<string, string>
-  ): Promise<Record<string, string>> {
-    if (!toLanguage || !config.translations.languages.includes(toLanguage)) {
-      throw new Error(
-        `Invalid or missing target language: ${toLanguage}. Supported languages are: ${config.translations.languages.join(
-          ", "
-        )}`
-      );
-    }
-    try {
-      const translatedData = await translationService.translate(
-        Object.entries(toTranslate).map(([key, value]) => ({
-          [key]: value,
-        })),
-        toLanguage
-      );
-    } catch (error: any) {
-      logger.error!("Error during translation:", error);
-      throw error;
-    }
-    return {};
-  }
-
-  app.listen(config.server.port, () => {
-    logger.info!(
-      `Translate.io Backend is running on port ${config.server.port}.`
-    );
-  });
-
-  return {};
+  return {
+    start: () => {
+      server = app.listen(config.server.port, () => {
+        logger.info!(
+          `Translate.io Backend is running on port ${config.server.port}.`
+        );
+      });
+    },
+    stop: () => {
+      if (server) {
+        server.close(() => {
+          logger.info!("Translate.io Backend has been stopped.");
+        });
+      }
+    },
+  };
 }
 
 export default createTranslateIoBackend;
+export { createTranslationService };
 export type {
   TranslateIoBackendOptions,
   TranslateIoBackendConfig,

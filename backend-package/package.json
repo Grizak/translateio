@@ -29,8 +29,10 @@
   },
   "dependencies": {
     "@translateio/shared": "^1.0.1",
+    "@types/bcrypt": "^6.0.0",
     "@types/express": "^5.0.3",
     "axios": "^1.11.0",
+    "bcrypt": "^6.0.0",
     "express": "^5.1.0",
     "nodeloggerg": "^4.3.2"
   }
