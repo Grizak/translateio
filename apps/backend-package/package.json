@@ -1,0 +1,47 @@
+{
+  "name": "@translateio/backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/main/cjs/bundle.cjs",
+  "scripts": {
+    "build": "webpack --mode production",
+    "watch": "webpack --mode development --watch --config webpack.config.unminifed.js",
+    "clean": "rimraf dist",
+    "build:prod": "webpack --mode production --config webpack.config.js",
+    "build:dev": "webpack --mode development --config webpack.config.unminifed.js",
+    "prebuild": "pnpm run clean"
+  },
+  "keywords": [],
+  "author": "Isak Grönlund <gronlundisak11@gmail.com>",
+  "license": "MIT",
+  "packageManager": "pnpm@10.14.0",
+  "devDependencies": {
+    "@translateio/shared": "workspace:*",
+    "@types/bcryptjs": "^3.0.0",
+    "@types/express": "^5.0.5",
+    "@types/node": "^24.2.1",
+    "bcryptjs": "^3.0.3",
+    "nodeloggerg": "^4.3.2",
+    "nodemon": "^3.1.10",
+    "rimraf": "^6.0.1",
+    "terser-webpack-plugin": "^5.3.14",
+    "ts-loader": "^9.5.2",
+    "tsx": "^4.20.4",
+    "typescript": "^5.9.2",
+    "webpack": "^5.101.1",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.2"
+  },
+  "dependencies": {
+    "axios": "^1.11.0",
+    "express": "^5.1.0"
+  },
+  "types": "dist/main/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/main/esm/bundle.mjs",
+      "require": "./dist/main/cjs/bundle.cjs",
+      "types": "./dist/main/types/index.d.ts"
+    }
+  }
+}

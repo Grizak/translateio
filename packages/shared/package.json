@@ -1,15 +1,9 @@
 {
   "name": "@translateio/shared",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "description": "A shared package for TranslateIO containing common types and utilities.",
   "main": "index.js",
-  "private": false,
-  "publishConfig": {
-    "access": "public"
-  },
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "private": true,
   "keywords": [
     "translateio",
     "shared",

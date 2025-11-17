@@ -4,14 +4,19 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "nodemon --exec tsx test.ts --watch ../backend-package/src --watch . --ext ts,json,js"
+    "test": "nodemon --exec tsx test.ts --watch node_modules/@translateio/backend --watch . --ext ts,json,js"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "packageManager": "pnpm@10.14.0",
   "dependencies": {
-    "dotenv": "^17.2.1",
-    "tsx": "^4.20.4"
-  }
+    "@translateio/backend": "workspace:*",
+    "dotenv": "^17.2.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11",
+    "tsx": "^4.20.6"
+  },
+  "private": true
 }

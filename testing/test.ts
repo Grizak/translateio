@@ -1,9 +1,7 @@
-import createTranslateio, {
-  TranslateIoBackendOptions,
-} from "../backend-package/src/index.ts";
+import createTranslateio from "@translateio/backend";
 import "dotenv/config";
 
-const config: TranslateIoBackendOptions = {
+const translateIo = createTranslateio({
   server: {
     port: 4545,
     auth: {
@@ -37,14 +35,12 @@ const config: TranslateIoBackendOptions = {
     },
     batchProcessing: true,
     postProcessing: (data) => {
-      return data.map((item) => ({
+      return data.map((item: { text: string }) => ({
         ...item,
         text: item.text.replace(/<[^>]*>/g, ""), // Remove HTML tags
       }));
     },
   },
-};
+});
 
-const translateio = createTranslateio(config);
-
-translateio.start();
+translateIo.start();

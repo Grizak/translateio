@@ -4,7 +4,14 @@ import nodeloggerg from "nodeloggerg";
 import express from "express";
 import axios from "axios";
 import http from "http";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
+import type {
+  TranslateIoBackendOptions,
+  TranslateIoBackendConfig,
+  TranslateIoBackendReturn,
+  TranslationService,
+  TranslationServiceConfig,
+} from "./types/index.js";
 
 const logger = nodeloggerg({
   serverConfig: {
@@ -14,251 +21,6 @@ const logger = nodeloggerg({
   logFile: "translateio-backend.log",
   compressOldLogs: true,
 });
-
-interface TranslationServiceConfig {
-  url: string;
-  headers?: Record<string, string>;
-  timeout: number;
-  method: "POST" | "GET";
-  contentType: "application/json" | "application/x-www-form-urlencoded";
-  retries: number;
-  payload: (
-    translationData: object[] | object,
-    toLanguage: string
-  ) => Record<string, any>;
-  batchProcessing: boolean;
-}
-
-interface TranslateIoBackendOptions {
-  /**
-   * Config for the server
-   */
-  server: {
-    /**
-     * The port to run the server on. Defaults to 4545 if not provided.
-     * @default 4545
-     */
-    port?: number;
-    /**
-     * Authentication configuration for the server.
-     */
-    auth: {
-      /**
-       * Username for server authentication. Defaults to "admin" if not provided.
-       * @default "admin"
-       */
-      username?: string;
-      /**
-       * Password for server authentication. Defaults to "admin" if not provided.
-       * @default "admin"
-       */
-      password?: string;
-    };
-  };
-  /**
-   * Configuration for translations.
-   */
-  translations: {
-    /**
-     * The file to read translations from. Has to be specified.
-     */
-    fromFile: string;
-    /**
-     * The directory to output translations to. Defaults to the current working directory's translations folder.
-     * If the directory does not exist, it will be created.
-     * @default `${process.cwd()}/translations`
-     */
-    outputDirectory?: string;
-    /**
-     * An array of languages to support. Has to be specified.
-     */
-    languages: string[];
-    /**
-     * The default language to use for translations.
-     * If not specified, the first language in the `languages` array will be used.
-     */
-    defaultLanguage?: string;
-    /**
-     * A function to parse the translation data from the input file.
-     */
-    parseTranslationData: (data: string) => Record<string, string>;
-  };
-  /**
-   * Specifications for the translation service.
-   */
-  translationService: {
-    /**
-     * The URL of the translation service. This is required.
-     */
-    url: string;
-    /**
-     * Additional headers to include in requests to the translation service.
-     * The api key should be included in the headers if required by the translation service.
-     */
-    headers?: Record<string, string>;
-    /**
-     * The timeout for requests to the translation service in milliseconds.
-     * @default 5000
-     */
-    timeout?: number;
-    /**
-     * The request method to use for the translation service.
-     * @default "POST"
-     */
-    method?: "POST" | "GET";
-    /**
-     * The content type for requests to the translation service.
-     * @default "application/json"
-     */
-    contentType?: "application/json" | "application/x-www-form-urlencoded";
-    /**
-     * The maximum number of retries for failed requests to the translation service.
-     * @default 3
-     */
-    retries?: number;
-    /**
-     * The payload to send to the translation service.
-     * This can be used to specify the structure of the request body.
-     * You should ensure that the payload function returns an object that matches the expected format of the translation service.
-     * You should make sure that the payload function checks whether it's used in batch processing or singular requests and formats the data accordingly.
-     * @param translationData - The data to be translated, which can be an object or an array of objects.
-     * @param toLanguage - The target language for the translation.
-     */
-    payload: (
-      translationData: object[] | object,
-      toLanguage: string
-    ) => Record<string, any>;
-    /**
-     * Specifies if the translation payload function should be called using batch processing or singular requests.
-     * If set to `true`, the payload function will handle multiple translations at once.
-     * If set to `false`, it will handle each translation individually.
-     */
-    batchProcessing: boolean;
-    /**
-     * Optional batch size for batch processing. Defaults to 30 if not provided.
-     * This is used to determine how many translations to send in a single request when batch processing is enabled.
-     * @default 30
-     */
-    batchSize?: number;
-    /**
-     * Post-processing function to apply to the translation data after receiving it from the translation service.
-     * This can be used to format or clean up the translated text.
-     */
-    postProcessing: (data: any) => Array<{ key: string; value: string }>;
-  };
-}
-
-interface TranslateIoBackendConfig {
-  /**
-   * Resolved server configuration with defaults applied
-   */
-  server: {
-    /**
-     * The port to run the server on (resolved with default)
-     */
-    port: number;
-    /**
-     * Authentication configuration (always present with defaults)
-     */
-    auth: {
-      /**
-       * Username for server authentication (resolved with default)
-       */
-      username: string;
-      /**
-       * Password for server authentication (resolved with default)
-       */
-      password: string;
-    };
-  };
-  /**
-   * Resolved translations configuration with defaults applied
-   */
-  translations: {
-    /**
-     * The file to read translations from (required, no default)
-     */
-    fromFile: string;
-    /**
-     * The directory to output translations to (resolved with default)
-     */
-    outputDirectory: string;
-    /**
-     * An array of languages to support (required, no default)
-     */
-    languages: string[];
-    /**
-     * The default language (resolved from languages array if not specified)
-     */
-    defaultLanguage: string | undefined;
-    /**
-     * A function to parse the translation data from the input file
-     */
-    parseTranslationData: (data: string) => Record<string, string>;
-  };
-  /**
-   * Resolved translation service configuration with defaults applied
-   */
-  translationService: {
-    /**
-     * The URL of the translation service (required, no default)
-     */
-    url: string;
-    /**
-     * Headers for translation service requests (resolved with default empty object)
-     */
-    headers: Record<string, string>;
-    /**
-     * The timeout for requests in milliseconds (resolved with default)
-     */
-    timeout: number;
-    /**
-     * The request method (resolved with default)
-     */
-    method: "POST" | "GET";
-    /**
-     * The content type for requests (resolved with default)
-     */
-    contentType: "application/json" | "application/x-www-form-urlencoded";
-    /**
-     * The maximum number of retries (resolved with default)
-     */
-    retries: number;
-    /**
-     * The payload function (required, no default)
-     */
-    payload: (
-      translationData: object[] | object,
-      toLanguage: string
-    ) => Record<string, any>;
-    /**
-     * Batch processing flag (resolved with default)
-     */
-    batchProcessing: boolean;
-    /**
-     * Optional batch size for batch processing (resolved with default)
-     */
-    batchSize: number; // Optional batch size for batch processing
-    /**
-     * Post-processing function
-     */
-    postProcessing: (data: any) => Array<{ key: string; value: string }>; // Post-processing function
-  };
-}
-
-interface TranslateIoBackendReturn {
-  start: () => void;
-  stop: () => void;
-}
-
-interface TranslationService {
-  translate: (
-    translations: Record<string, string> | Record<string, string>[],
-    targetLanguage: string
-  ) => Promise<Record<string, string>>;
-  getMetadata: (language: string) => Promise<object[]>;
-  setMetadata: (language: string, metadata: object[]) => Promise<void>;
-}
 
 // --- Auth Middleware ---
 const basicAuthMiddleware =
@@ -298,7 +60,8 @@ const basicAuthMiddleware =
   };
 
 function createTranslationService(
-  config: TranslateIoBackendConfig
+  config: TranslateIoBackendConfig,
+  metadata: object[] = []
 ): TranslationService {
   return {
     translate: async (
@@ -314,7 +77,8 @@ function createTranslationService(
         // Build payload through user-defined payload fn
         const payload = config.translationService.payload(
           inputArray,
-          targetLanguage
+          targetLanguage,
+          metadata
         );
 
         const response = await axios({
@@ -368,9 +132,10 @@ function createTranslationService(
 async function translateWithBatching(
   data: Record<string, string>,
   toLanguage: string,
-  config: TranslateIoBackendConfig
+  config: TranslateIoBackendConfig,
+  metadata: object[] = []
 ): Promise<Record<string, string>> {
-  const service = createTranslationService(config);
+  const service = createTranslationService(config, metadata);
 
   if (config.translationService.batchProcessing) {
     // --- Batch processing ---
@@ -410,6 +175,7 @@ function createTranslateIoBackend(
   options: TranslateIoBackendOptions
 ): TranslateIoBackendReturn {
   let server: http.Server | undefined;
+  let metadata: object[] = [];
   const config: TranslateIoBackendConfig = {
     server: {
       port: options.server.port || 4545, // Default port if not provided
@@ -428,8 +194,9 @@ function createTranslateIoBackend(
         options.translations.defaultLanguage ||
         (options.translations.languages.length > 0
           ? options.translations.languages[0]
-          : undefined),
+          : options.translations.languages[0] || "en"),
       parseTranslationData: options.translations.parseTranslationData,
+      parseMetadata: options.translations.parseMetadata || (() => []),
     },
     translationService: {
       url: options.translationService.url,
@@ -511,7 +278,7 @@ function createTranslateIoBackend(
   }
 
   // Ensure that the payload function returns an object
-  const testPayload = config.translationService.payload({}, "en");
+  const testPayload = config.translationService.payload({}, "en", metadata);
   if (!testPayload || typeof testPayload !== "object") {
     throw new Error(
       "The payload function must return an object for the translation service."
@@ -549,7 +316,11 @@ function createTranslateIoBackend(
       languageNames[language as keyof typeof languageNames];
     if (!mappedLanguage)
       return res.status(404).json({ error: "Language not found." });
-    res.json({ language: mappedLanguage });
+    res.json({
+      language: mappedLanguage.enName,
+      nativeName: mappedLanguage.nativeName,
+      code: language,
+    });
   });
 
   // Load translations
@@ -562,14 +333,51 @@ function createTranslateIoBackend(
     throw error;
   }
 
-  return {
-    start: () => {
-      server = app.listen(config.server.port, () => {
-        logger.info!(
-          `Translate.io Backend is running on port ${config.server.port}.`
+  app.get("translate/:toLang", async (req, res) => {
+    const { toLang } = req.params;
+
+    if (!config.translations.languages.includes(toLang)) {
+      return res.status(400).json({ error: "Unsupported target language." });
+    }
+
+    try {
+      const translated = await translateWithBatching(
+        toTranslate,
+        toLang,
+        config,
+        metadata
+      );
+      res.json({ translations: translated });
+    } catch (error: any) {
+      logger.error!("Translation error:", error);
+      res
+        .status(500)
+        .json({ error: "Translation failed.", details: error.message });
+    }
+  });
+
+  const startFn = (port: number) => () => {
+    server = app.listen(port, () => {
+      logger.info!(`Translate.io Backend is running on port ${port}.`);
+    });
+
+    server.on("error", (error: any) => {
+      if (error.code === "EADDRINUSE") {
+        logger.error!(
+          `Port ${port} is already in use. Retrying with next port.`
         );
-      });
-    },
+        startFn(port + 1)();
+      } else {
+        logger.error!("Error starting server:", error);
+        throw error;
+      }
+    });
+  };
+
+  const start = startFn(config.server.port);
+
+  return {
+    start,
     stop: () => {
       if (server) {
         server.close(() => {
