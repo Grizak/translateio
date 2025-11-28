@@ -4,14 +4,19 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build:frontend": "pnpm --filter frontend build",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "start": "pnpm --filter backend dev",
+    "watch:backend": "pnpm --filter backend watch",
+    "dev": "concurrently \"pnpm run watch:backend\" \"pnpm run dev:frontend\"",
+    "build:backend": "pnpm -F backend build:electron"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@10.14.0",
-  "dependencies": {
-    "electron": "^37.2.6",
-    "electron-builder": "^26.0.12"
+  "packageManager": "pnpm@10.23.0",
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "nodemon": "^3.1.11"
   }
 }

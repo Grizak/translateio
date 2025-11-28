@@ -1,8 +1,7 @@
 import { languageNames } from "@translateio/shared";
 import fs from "fs";
-import nodeloggerg from "nodeloggerg";
+import path from "path";
 import express from "express";
-import axios from "axios";
 import http from "http";
 import bcrypt from "bcryptjs";
 import type {
@@ -11,178 +10,51 @@ import type {
   TranslateIoBackendReturn,
   TranslationService,
   TranslationServiceConfig,
-} from "./types/index.js";
+} from "@/types";
 
-const logger = nodeloggerg({
-  serverConfig: {
-    startWebServer: false,
-  },
-  logLevel: "info",
-  logFile: "translateio-backend.log",
-  compressOldLogs: true,
-});
+// Middleware
+import {
+  basicAuthMiddleware,
+  tracingMiddleware,
+  createRateLimitMiddleware,
+  productionBlock,
+} from "@/middleware";
 
-// --- Auth Middleware ---
-const basicAuthMiddleware =
-  (username: string, hashedPassword: string) =>
-  async (
-    req: express.Request,
-    res: express.Response,
-    next: express.NextFunction
-  ) => {
-    const auth = req.headers.authorization;
+// Routes
+import {
+  registerHealthRoutes,
+  registerLanguagesRoutes,
+  registerTranslateRoutes,
+  registerAsyncRoutes,
+  registerDebugRoutes,
+  registerReadRoutes,
+  registerWriteRoutes,
+} from "@/routes";
 
-    if (!auth || !auth.startsWith("Basic ")) {
-      res.setHeader("WWW-Authenticate", 'Basic realm="Translate.io"');
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+// Translation
+import { createTranslationService } from "@/translation";
 
-    try {
-      const base64Credentials = auth.split(" ")[1];
-      const decoded = Buffer.from(base64Credentials, "base64").toString(
-        "utf-8"
-      );
-      const [inputUser, inputPass] = decoded.split(":");
-
-      const passwordMatch = await bcrypt.compare(inputPass, hashedPassword);
-
-      if (inputUser !== username || !passwordMatch) {
-        res.setHeader("WWW-Authenticate", 'Basic realm="Translate.io"');
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-
-      next();
-    } catch (err) {
-      return res
-        .status(400)
-        .json({ error: "Invalid Authorization header format" });
-    }
-  };
-
-function createTranslationService(
-  config: TranslateIoBackendConfig,
-  metadata: object[] = []
-): TranslationService {
-  return {
-    translate: async (
-      translations: Record<string, string> | Record<string, string>[],
-      targetLanguage: string
-    ): Promise<Record<string, string>> => {
-      try {
-        // Normalize input to array of records
-        const inputArray = Array.isArray(translations)
-          ? translations
-          : [translations];
-
-        // Build payload through user-defined payload fn
-        const payload = config.translationService.payload(
-          inputArray,
-          targetLanguage,
-          metadata
-        );
-
-        const response = await axios({
-          url: config.translationService.url,
-          method: config.translationService.method,
-          headers: config.translationService.headers,
-          timeout: config.translationService.timeout,
-          data: payload,
-        });
-
-        // Ensure postProcessing returns proper structure
-        const processed: { key: string; value: string }[] =
-          config.translationService.postProcessing(response.data);
-
-        // Convert array of { key, value } → Record<string, string>
-        return processed.reduce<Record<string, string>>(
-          (acc, { key, value }) => {
-            acc[key] = value;
-            return acc;
-          },
-          {}
-        );
-      } catch (error: any) {
-        // Add better error context
-        throw new Error(
-          `Translation request failed: ${error.message ?? error.toString()}`
-        );
-      }
-    },
-
-    getMetadata: async (language: string): Promise<object[]> => {
-      const metadata = await fs.promises.readFile(
-        `${config.translations.outputDirectory}/${language}.metadata.json`,
-        "utf-8"
-      );
-      return JSON.parse(metadata);
-    },
-
-    setMetadata: async (
-      language: string,
-      metadata: object[]
-    ): Promise<void> => {
-      await fs.promises.writeFile(
-        `${config.translations.outputDirectory}/${language}.metadata.json`,
-        JSON.stringify(metadata, null, 2)
-      );
-    },
-  };
-}
-
-async function translateWithBatching(
-  data: Record<string, string>,
-  toLanguage: string,
-  config: TranslateIoBackendConfig,
-  metadata: object[] = []
-): Promise<Record<string, string>> {
-  const service = createTranslationService(config, metadata);
-
-  if (config.translationService.batchProcessing) {
-    // --- Batch processing ---
-    const entries = Object.entries(data);
-    const results: Record<string, string> = {};
-
-    for (
-      let i = 0;
-      i < entries.length;
-      i += config.translationService.batchSize
-    ) {
-      const batch = entries.slice(i, i + config.translationService.batchSize);
-
-      // Prepare payload as array of objects
-      const batchData = batch.map(([key, value]) => ({ key, value }));
-
-      const response = await service.translate(batchData, toLanguage);
-      // `service.translate` already returns Record<string,string>
-      Object.assign(results, response);
-    }
-
-    return results;
-  } else {
-    // --- Singular processing ---
-    const results: Record<string, string> = {};
-
-    for (const [key, value] of Object.entries(data)) {
-      const response = await service.translate({ [key]: value }, toLanguage);
-      Object.assign(results, response);
-    }
-
-    return results;
-  }
-}
+// Logger
+import logger from "@/utils/logger";
 
 function createTranslateIoBackend(
   options: TranslateIoBackendOptions
 ): TranslateIoBackendReturn {
   let server: http.Server | undefined;
   let metadata: object[] = [];
+  const cache = new Map<string, Record<string, string>>();
   const config: TranslateIoBackendConfig = {
     server: {
-      port: options.server.port || 4545, // Default port if not provided
-      // Ensure that the auth object is always present
+      port: options.server.port || 4545,
       auth: {
         username: options.server.auth.username || "admin",
         password: bcrypt.hashSync(options.server.auth.password || "admin", 10),
+      },
+      rateLimit: {
+        enabled: options.server.rateLimit?.enabled !== false,
+        windowMs: options.server.rateLimit?.windowMs || 60000,
+        maxRequests: options.server.rateLimit?.maxRequests || 100,
+        skipPaths: options.server.rateLimit?.skipPaths || ["/health"],
       },
     },
     translations: {
@@ -201,16 +73,18 @@ function createTranslateIoBackend(
     translationService: {
       url: options.translationService.url,
       headers: options.translationService.headers || {},
-      timeout: options.translationService.timeout || 5000, // Default timeout
-      method: options.translationService.method || "POST", // Default method
-      contentType: options.translationService.contentType || "application/json", // Default content type
-      retries: options.translationService.retries || 3, // Default retries
+      timeout: options.translationService.timeout || 5000,
+      method: options.translationService.method || "POST",
+      contentType: options.translationService.contentType || "application/json",
+      retries: options.translationService.retries || 3,
       payload: options.translationService.payload,
       batchProcessing: options.translationService.batchProcessing,
-      batchSize: options.translationService.batchSize || 30, // Default batch size
+      batchSize: options.translationService.batchSize || 30,
       postProcessing: options.translationService.postProcessing,
     },
   };
+
+  // Validate output directory
   try {
     fs.accessSync(
       config.translations.outputDirectory,
@@ -218,19 +92,16 @@ function createTranslateIoBackend(
     );
   } catch (error: any) {
     if (error.code !== "ENOENT") {
-      // If the directory exists but is not accessible, log the error
       logger.error!(
         `Error accessing output directory: ${config.translations.outputDirectory}`,
         error
       );
-
       throw error;
     }
-    // If the directory does not exist, create it
     fs.mkdirSync(config.translations.outputDirectory, { recursive: true });
   }
 
-  // Ensure that the languages array is not empty
+  // Validate configuration
   if (
     !config.translations.languages ||
     config.translations.languages.length === 0
@@ -238,17 +109,14 @@ function createTranslateIoBackend(
     throw new Error("No languages specified for translation.");
   }
 
-  // Ensure that the fromFile is specified
   if (!config.translations.fromFile) {
     throw new Error("No fromFile specified for translation.");
   }
 
-  // Ensure that the fromFile exists
   if (!fs.existsSync(config.translations.fromFile)) {
     throw new Error("fromFile does not exist.");
   }
 
-  // Ensure that the languages are valid
   config.translations.languages.forEach((language) => {
     if (!Object.keys(languageNames).includes(language)) {
       throw new Error(
@@ -259,7 +127,6 @@ function createTranslateIoBackend(
     }
   });
 
-  // Ensure that the defaultLanguage is one of the languages specified
   if (
     config.translations.defaultLanguage &&
     !config.translations.languages.includes(config.translations.defaultLanguage)
@@ -267,17 +134,14 @@ function createTranslateIoBackend(
     throw new Error("defaultLanguage must be one of the specified languages.");
   }
 
-  // Ensure that the translation service URL is specified
   if (!config.translationService.url) {
     throw new Error("No translation service URL specified.");
   }
 
-  // Ensure that the payload function is provided
   if (typeof config.translationService.payload !== "function") {
     throw new Error("No payload function specified for translation service.");
   }
 
-  // Ensure that the payload function returns an object
   const testPayload = config.translationService.payload({}, "en", metadata);
   if (!testPayload || typeof testPayload !== "object") {
     throw new Error(
@@ -285,14 +149,54 @@ function createTranslateIoBackend(
     );
   }
 
+  // Prepare cache directory and load any existing caches
+  const cacheDir = path.join(config.translations.outputDirectory, "cache");
+  try {
+    fs.accessSync(cacheDir, fs.constants.R_OK | fs.constants.W_OK);
+  } catch (err: any) {
+    if (err.code !== "ENOENT") {
+      logger.error!("Error accessing cache directory:", err);
+    }
+    fs.mkdirSync(cacheDir, { recursive: true });
+  }
+
+  // Load per-language caches into in-memory map
+  for (const language of config.translations.languages) {
+    const cachePath = path.join(cacheDir, `${language}.json`);
+    if (fs.existsSync(cachePath)) {
+      try {
+        const content = fs.readFileSync(cachePath, "utf-8");
+        cache.set(language, JSON.parse(content));
+      } catch (err: any) {
+        logger.error!(`Failed to load cache for ${language}:`, err);
+        cache.set(language, {});
+      }
+    } else {
+      cache.set(language, {});
+    }
+  }
+
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+  // Middleware
+  app.use(tracingMiddleware);
+
+  // Apply rate limiting if enabled
+  if (config.server.rateLimit.enabled) {
+    const rateLimiter = createRateLimitMiddleware({
+      windowMs: config.server.rateLimit.windowMs,
+      maxRequests: config.server.rateLimit.maxRequests,
+      skip: (req) => config.server.rateLimit.skipPaths.includes(req.path),
+    });
+    app.use(rateLimiter.middleware);
+  }
+
   // Public endpoint
   app.get("/", (req, res) => res.send("Translate.io Backend is running."));
 
-  // Apply auth middleware to all protected endpoints
+  // Apply auth middleware to protected routes
   const authMiddleware = basicAuthMiddleware(
     config.server.auth.username,
     config.server.auth.password
@@ -301,61 +205,42 @@ function createTranslateIoBackend(
   app.use("/languages", authMiddleware);
   app.use("/languageMapping", authMiddleware);
   app.use("/translate", authMiddleware);
+  app.use("/debug", authMiddleware);
+  app.use("/write", authMiddleware);
+  app.use("/read", authMiddleware);
 
-  // Languages endpoints
-  app.get("/languages", (req, res) => {
-    res.json({
-      languages: config.translations.languages,
-      defaultLanguage: config.translations.defaultLanguage,
-    });
-  });
+  app.use("/write", productionBlock);
+  app.use("/debug", productionBlock);
+  app.use("/translate", productionBlock);
 
-  app.get("/languageMapping/:language", (req, res) => {
-    const { language } = req.params;
-    const mappedLanguage =
-      languageNames[language as keyof typeof languageNames];
-    if (!mappedLanguage)
-      return res.status(404).json({ error: "Language not found." });
-    res.json({
-      language: mappedLanguage.enName,
-      nativeName: mappedLanguage.nativeName,
-      code: language,
-    });
-  });
-
-  // Load translations
+  // Load translations and metadata
   let toTranslate: Record<string, string> = {};
   try {
     const data = fs.readFileSync(config.translations.fromFile, "utf-8");
     toTranslate = config.translations.parseTranslationData(data);
+
+    // Parse metadata from the input file
+    metadata = config.translations.parseMetadata(data);
+    logger.info!(
+      `Loaded ${Object.keys(toTranslate).length} translation keys and ${
+        metadata.length
+      } metadata entries.`
+    );
   } catch (error: any) {
     logger.error!("Error loading translations:", error);
     throw error;
   }
 
-  app.get("translate/:toLang", async (req, res) => {
-    const { toLang } = req.params;
+  // Register all routes
+  registerHealthRoutes(app);
+  registerLanguagesRoutes(app, config);
+  registerTranslateRoutes(app, config, toTranslate, cache, cacheDir, metadata);
+  registerAsyncRoutes(app, config, cache, cacheDir, metadata);
+  registerDebugRoutes(app, config, cache);
+  registerWriteRoutes(app);
+  registerReadRoutes(app);
 
-    if (!config.translations.languages.includes(toLang)) {
-      return res.status(400).json({ error: "Unsupported target language." });
-    }
-
-    try {
-      const translated = await translateWithBatching(
-        toTranslate,
-        toLang,
-        config,
-        metadata
-      );
-      res.json({ translations: translated });
-    } catch (error: any) {
-      logger.error!("Translation error:", error);
-      res
-        .status(500)
-        .json({ error: "Translation failed.", details: error.message });
-    }
-  });
-
+  // Server lifecycle
   const startFn = (port: number) => () => {
     server = app.listen(port, () => {
       logger.info!(`Translate.io Backend is running on port ${port}.`);

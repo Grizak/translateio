@@ -1,5 +1,9 @@
-const path = require("path");
-const TerserPlugin = require("terser-webpack-plugin");
+import { resolve, dirname } from "path";
+import TerserPlugin from "terser-webpack-plugin";
+import TscAliasPlugin from "./webpack/TscAliasPlugin.js";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const baseConfig = {
   target: "node",
@@ -17,6 +21,10 @@ const baseConfig = {
 
   resolve: {
     extensions: [".tsx", ".ts", ".js"],
+    // Alias @ point to src directory
+    alias: {
+      "@": resolve(__dirname, "src"),
+    },
   },
 
   optimization: {
@@ -43,6 +51,8 @@ const baseConfig = {
     express: "commonjs express",
     axios: "commonjs axios",
   },
+
+  plugins: [new TscAliasPlugin()],
 };
 
 // ----------------------
@@ -52,7 +62,7 @@ const cjsConfig = {
   ...baseConfig,
   output: {
     filename: "bundle.cjs",
-    path: path.resolve(__dirname, "dist/main/cjs"),
+    path: resolve(__dirname, "dist/main/cjs"),
     clean: true,
     library: {
       type: "commonjs2",
@@ -70,7 +80,7 @@ const esmConfig = {
   },
   output: {
     filename: "bundle.mjs",
-    path: path.resolve(__dirname, "dist/main/esm"),
+    path: resolve(__dirname, "dist/main/esm"),
     clean: true,
     library: {
       type: "module",
@@ -78,4 +88,4 @@ const esmConfig = {
   },
 };
 
-module.exports = [cjsConfig, esmConfig];
+export default [cjsConfig, esmConfig];

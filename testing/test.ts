@@ -13,8 +13,11 @@ const translateIo = createTranslateio({
     fromFile: "./translations.json",
     languages: ["en", "es", "fr"],
     defaultLanguage: "en",
-    parseTranslationData: (data) => {
-      return JSON.parse(data);
+    parseTranslationData: (data: string) => {
+      return JSON.parse(data).translations || {};
+    },
+    parseMetadata: (data: string) => {
+      return JSON.parse(data).metadata || [];
     },
   },
   translationService: {
@@ -27,15 +30,15 @@ const translateIo = createTranslateio({
     method: "POST",
     contentType: "application/json",
     retries: 3,
-    payload: (translationData, toLanguage) => {
+    payload: (translationData: string, toLanguage: string) => {
       return {
         text: translationData,
         target_lang: toLanguage,
       };
     },
     batchProcessing: true,
-    postProcessing: (data) => {
-      return data.map((item: { text: string }) => ({
+    postProcessing: (data: { text: string }[]) => {
+      return data.map((item) => ({
         ...item,
         text: item.text.replace(/<[^>]*>/g, ""), // Remove HTML tags
       }));

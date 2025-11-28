@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json.schemastore.org/electron-builder.json",
+  "appId": "com.grizak.translateio",
+  "productName": "Translate Io Desktop App",
+
+  "directories": {
+    "output": "dist/app",
+    "buildResources": "build"
+  },
+
+  "files": ["dist/backend/**", "!**/*.map", "!**/*.ts", "!**/__tests__/**"],
+
+  "asar": true,
+
+  "extraResources": [
+    {
+      "from": "dist/backend/frontend",
+      "to": "frontend",
+      "filter": ["**/*"]
+    }
+  ],
+
+  "mac": {
+    "category": "public.app-category.developer-tools",
+    "target": ["dmg"],
+    "hardenedRuntime": false
+  },
+
+  "win": {
+    "target": ["nsis"]
+  },
+
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowElevation": true,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true
+  },
+
+  "linux": {
+    "target": ["AppImage", "deb"],
+    "category": "Development"
+  },
+
+  "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+  "compression": "maximum"
+}

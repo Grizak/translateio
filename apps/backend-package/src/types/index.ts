@@ -7,7 +7,8 @@ interface TranslationServiceConfig {
   retries: number;
   payload: (
     translationData: object[] | object,
-    toLanguage: string
+    toLanguage: string,
+    metadata?: object[]
   ) => Record<string, any>;
   batchProcessing: boolean;
 }
@@ -37,6 +38,31 @@ interface TranslateIoBackendOptions {
        */
       password?: string;
     };
+    /**
+     * Rate limiting configuration for the server.
+     */
+    rateLimit?: {
+      /**
+       * Enable or disable rate limiting. Defaults to true.
+       * @default true
+       */
+      enabled?: boolean;
+      /**
+       * The time window in milliseconds for rate limiting. Defaults to 60000 (1 minute).
+       * @default 60000
+       */
+      windowMs?: number;
+      /**
+       * The maximum number of requests allowed per time window. Defaults to 100.
+       * @default 100
+       */
+      maxRequests?: number;
+      /**
+       * An array of paths to skip rate limiting on (e.g., ["/health"]).
+       * @default ["/health"]
+       */
+      skipPaths?: string[];
+    };
   };
   /**
    * Configuration for translations.
@@ -63,10 +89,14 @@ interface TranslateIoBackendOptions {
     defaultLanguage?: string;
     /**
      * A function to parse the translation data from the input file.
+     * @param data - The raw translation data string from the input file.
+     * @returns An object mapping translation keys to their corresponding translated strings.
      */
     parseTranslationData: (data: string) => Record<string, string>;
     /**
      * A function to parse the metadata from the input file.
+     * @param data - The raw metadata string from the input file.
+     * @returns An array of metadata objects.
      */
     parseMetadata?: (data: string) => object[];
   };
@@ -114,7 +144,7 @@ interface TranslateIoBackendOptions {
     payload: (
       translationData: object[] | object,
       toLanguage: string,
-      metadata: object[]
+      metadata?: object[]
     ) => Record<string, any>;
     /**
      * Specifies if the translation payload function should be called using batch processing or singular requests.
@@ -163,10 +193,33 @@ interface TranslationService {
   setMetadata: (language: string, metadata: object[]) => Promise<void>;
 }
 
+interface AsyncTranslationRequest {
+  id: string;
+  data: Record<string, string>;
+  targetLanguage: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  result?: Record<string, string>;
+  error?: string;
+  createdAt: Date;
+  completedAt?: Date;
+}
+
+type SSEEventType = "start" | "progress" | "complete" | "error";
+
+interface SSEEvent {
+  type: SSEEventType;
+  requestId: string;
+  data: any;
+  timestamp: string;
+}
+
 export type {
   TranslateIoBackendOptions,
   TranslateIoBackendConfig,
   TranslateIoBackendReturn,
   TranslationService,
   TranslationServiceConfig,
+  AsyncTranslationRequest,
+  SSEEvent,
+  SSEEventType,
 };

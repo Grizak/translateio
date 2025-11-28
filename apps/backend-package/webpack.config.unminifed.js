@@ -1,18 +1,20 @@
-const baseConfig = require("./webpack.config.js");
+import cfg from "./webpack.config.js";
+const [cjsConfig, esmConfig] = cfg;
 
-module.exports = [
-  {
-    ...baseConfig[0],
-    optimization: {
-      ...baseConfig[0].optimization,
-      minimize: false, // Disable minification
-    },
+const noMinifyBaseConfig = {
+  optimization: {
+    minimize: false, // Disable minification
   },
-  {
-    ...baseConfig[1],
-    optimization: {
-      ...baseConfig[1].optimization,
-      minimize: false, // Disable minification
-    },
-  },
-];
+};
+
+const noMinifyCjsConfig = {
+  ...cjsConfig,
+  ...noMinifyBaseConfig,
+};
+
+const noMinifyEsmConfig = {
+  ...esmConfig,
+  ...noMinifyBaseConfig,
+};
+
+export default [noMinifyCjsConfig, noMinifyEsmConfig];

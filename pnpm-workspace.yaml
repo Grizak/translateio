@@ -1,4 +1,8 @@
 packages:
-  - "apps/*"
-  - "packages/*"
-  - "testing"
+  - apps/*
+  - apps/electron/*
+  - packages/*
+  - testing
+
+onlyBuiltDependencies:
+  - electron
