@@ -3,6 +3,7 @@ packages:
   - apps/electron/*
   - packages/*
   - testing
+  - docs-frontend
 
 onlyBuiltDependencies:
   - electron

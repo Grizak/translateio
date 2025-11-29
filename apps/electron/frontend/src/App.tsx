@@ -13,9 +13,9 @@ export default function App() {
           <a
             className="text-blue-600 underline"
             target="_blank"
-            href="https://translateio.app" // FIXME: Use correct url
+            href="https://translateio.isaksweb.xyz" // FIXME: Use correct url
           >
-            https://translateio.app
+            https://translateio.isaksweb.xyz
           </a>
         </p>
       </div>
