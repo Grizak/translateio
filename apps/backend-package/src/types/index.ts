@@ -1,3 +1,49 @@
+// ─── File structures ─────────────────────────────────────────────────────────
+
+/**
+ * A single entry in the source translation file.
+ * This is the canonical string that will be translated into each target language.
+ */
+interface SourceEntry {
+  content: string;
+}
+
+/**
+ * The full structure of a fromFile source file.
+ * Keys are translation identifiers, values are the source content.
+ */
+type SourceFile = Record<string, SourceEntry>;
+
+/**
+ * Metadata attached to each entry in an output translation file.
+ * Tracks the state of the translation for that key.
+ */
+interface TranslationMetadata {
+  /** Whether this key has ever been run through the translation service. */
+  translated: boolean;
+  /** Whether the user has manually edited this output entry. Prevents automatic overwriting. */
+  userChanged: boolean;
+  /** Whether the source content has changed since this key was last translated. */
+  changed: boolean;
+  /** ISO timestamp of when this key was last translated. */
+  lastTranslated: string | null;
+}
+
+/**
+ * A single entry in an output translation file.
+ */
+interface OutputEntry {
+  content: string;
+  metadata: TranslationMetadata;
+}
+
+/**
+ * The full structure of an output translation file (translated/{lang}.json).
+ */
+type OutputFile = Record<string, OutputEntry>;
+
+// ─── Configuration ────────────────────────────────────────────────────────────
+
 interface TranslationServiceConfig {
   url: string;
   headers?: Record<string, string>;
@@ -6,16 +52,17 @@ interface TranslationServiceConfig {
   contentType: "application/json" | "application/x-www-form-urlencoded";
   retries: number;
   payload: (
-    translationData: object[] | object,
+    translationData:
+      | { key: string; content: string }[]
+      | { key: string; content: string },
     toLanguage: string,
-    metadata?: object[]
   ) => Record<string, any>;
   batchProcessing: boolean;
 }
 
 interface TranslateIoBackendOptions {
   /**
-   * Config for the server
+   * Config for the server.
    */
   server: {
     /**
@@ -29,11 +76,15 @@ interface TranslateIoBackendOptions {
     auth: {
       /**
        * Username for server authentication. Defaults to "admin" if not provided.
+       * It's highly recommended to set this in production, since anyone with this
+       * string will be able to access the server.
        * @default "admin"
        */
       username?: string;
       /**
        * Password for server authentication. Defaults to "admin" if not provided.
+       * It's highly recommended to set this in production, since anyone with this
+       * string will be able to access the server.
        * @default "admin"
        */
       password?: string;
@@ -69,7 +120,7 @@ interface TranslateIoBackendOptions {
    */
   translations: {
     /**
-     * The file to read translations from. Has to be specified.
+     * Path to the source translation file. Must be a valid SourceFile JSON.
      */
     fromFile: string;
     /**
@@ -79,90 +130,71 @@ interface TranslateIoBackendOptions {
      */
     outputDirectory?: string;
     /**
-     * An array of languages to support. Has to be specified.
+     * An array of target language codes to translate into. At least one is required.
      */
     languages: string[];
     /**
-     * The default language to use for translations.
-     * If not specified, the first language in the `languages` array will be used.
+     * The default language to use. Defaults to the first entry in `languages` if not specified.
      */
     defaultLanguage?: string;
-    /**
-     * A function to parse the translation data from the input file.
-     * @param data - The raw translation data string from the input file.
-     * @returns An object mapping translation keys to their corresponding translated strings.
-     */
-    parseTranslationData: (data: string) => Record<string, string>;
-    /**
-     * A function to parse the metadata from the input file.
-     * @param data - The raw metadata string from the input file.
-     * @returns An array of metadata objects.
-     */
-    parseMetadata?: (data: string) => object[];
   };
   /**
-   * Specifications for the translation service.
+   * Specifications for the external translation service.
    */
   translationService: {
     /**
-     * The URL of the translation service. This is required.
+     * The URL of the translation service. Required.
      */
     url: string;
     /**
-     * Additional headers to include in requests to the translation service.
-     * The api key should be included in the headers if required by the translation service.
+     * Additional headers to include in requests (e.g. API keys).
      */
     headers?: Record<string, string>;
     /**
-     * The timeout for requests to the translation service in milliseconds.
+     * Request timeout in milliseconds.
      * @default 5000
      */
     timeout?: number;
     /**
-     * The request method to use for the translation service.
+     * HTTP method to use.
      * @default "POST"
      */
     method?: "POST" | "GET";
     /**
-     * The content type for requests to the translation service.
+     * Content type for requests.
      * @default "application/json"
      */
     contentType?: "application/json" | "application/x-www-form-urlencoded";
     /**
-     * The maximum number of retries for failed requests to the translation service.
+     * Maximum number of retries for failed requests.
      * @default 3
      */
     retries?: number;
     /**
-     * The payload to send to the translation service.
-     * This can be used to specify the structure of the request body.
-     * You should ensure that the payload function returns an object that matches the expected format of the translation service.
-     * You should make sure that the payload function checks whether it's used in batch processing or singular requests and formats the data accordingly.
-     * @param translationData - The data to be translated, which can be an object or an array of objects.
-     * @param toLanguage - The target language for the translation.
+     * Builds the request payload for the translation service.
+     * `translationData` will be a single entry or array of entries depending on `batchProcessing`.
      */
     payload: (
-      translationData: object[] | object,
+      translationData:
+        | { key: string; content: string }[]
+        | { key: string; content: string },
       toLanguage: string,
-      metadata?: object[]
     ) => Record<string, any>;
     /**
-     * Specifies if the translation payload function should be called using batch processing or singular requests.
-     * If set to `true`, the payload function will handle multiple translations at once.
-     * If set to `false`, it will handle each translation individually.
+     * Whether to send multiple keys in a single request.
+     * If false, each key is translated individually.
      */
     batchProcessing: boolean;
     /**
-     * Optional batch size for batch processing. Defaults to 30 if not provided.
-     * This is used to determine how many translations to send in a single request when batch processing is enabled.
+     * How many keys to include per batch request. Only used when `batchProcessing` is true.
      * @default 30
      */
     batchSize?: number;
     /**
-     * Post-processing function to apply to the translation data after receiving it from the translation service.
-     * This can be used to format or clean up the translated text.
+     * Post-processes the raw response from the translation service.
+     * Must return an array of `{ key, content }` pairs.
      */
-    postProcessing: (data: any) => { key: string; value: string }[];
+    postProcessing: (data: any) => { key: string; content: string }[];
   };
 }
 
@@ -172,12 +204,14 @@ type RequiredRecursive<T> = {
     ? NonNullable<T[P]> extends Array<infer U>
       ? Array<RequiredRecursive<U>>
       : NonNullable<T[P]> extends Function
-      ? NonNullable<T[P]>
-      : RequiredRecursive<NonNullable<T[P]>>
+        ? NonNullable<T[P]>
+        : RequiredRecursive<NonNullable<T[P]>>
     : NonNullable<T[P]>;
 };
 
 type TranslateIoBackendConfig = RequiredRecursive<TranslateIoBackendOptions>;
+
+// ─── Server ───────────────────────────────────────────────────────────────────
 
 interface TranslateIoBackendReturn {
   start: () => void;
@@ -186,19 +220,19 @@ interface TranslateIoBackendReturn {
 
 interface TranslationService {
   translate: (
-    translations: Record<string, string> | Record<string, string>[],
-    targetLanguage: string
-  ) => Promise<Record<string, string>>;
-  getMetadata: (language: string) => Promise<object[]>;
-  setMetadata: (language: string, metadata: object[]) => Promise<void>;
+    entries: { key: string; content: string }[],
+    targetLanguage: string,
+  ) => Promise<{ key: string; content: string }[]>;
 }
+
+// ─── Async jobs ───────────────────────────────────────────────────────────────
 
 interface AsyncTranslationRequest {
   id: string;
-  data: Record<string, string>;
+  data: SourceFile;
   targetLanguage: string;
   status: "pending" | "processing" | "completed" | "failed";
-  result?: Record<string, string>;
+  result?: OutputFile;
   error?: string;
   createdAt: Date;
   completedAt?: Date;
@@ -214,6 +248,11 @@ interface SSEEvent {
 }
 
 export type {
+  SourceEntry,
+  SourceFile,
+  TranslationMetadata,
+  OutputEntry,
+  OutputFile,
   TranslateIoBackendOptions,
   TranslateIoBackendConfig,
   TranslateIoBackendReturn,

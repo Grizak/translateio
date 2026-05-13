@@ -6,12 +6,15 @@
     "test": "pnpm --filter ./testing/ test",
     "dev:backend": "pnpm --filter ./apps/backend-package/ watch",
     "clean": "pnpm --recursive run clean",
-    "build:electron:app:win": "pnpm -F ./apps/electron/backend build:win",
-    "build:electron:app:mac": "pnpm -F ./apps/electron/backend build:mac",
-    "build:electron:app:linux": "pnpm -F ./apps/electron/backend build:linux"
+    "build:wails:app:win": "",
+    "build:wails:app:mac": "",
+    "build:wails:app:linux": ""
   },
-  "packageManager": "pnpm@10.23.0",
+  "packageManager": "pnpm@10.31.0",
   "dependencies": {
     "concurrently": "^9.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.4.0"
   }
 }

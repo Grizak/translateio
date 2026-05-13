@@ -10,6 +10,7 @@ import type {
   TranslateIoBackendReturn,
   TranslationService,
   TranslationServiceConfig,
+  SourceFile,
 } from "@/types";
 
 // Middleware
@@ -29,6 +30,7 @@ import {
   registerDebugRoutes,
   registerReadRoutes,
   registerWriteRoutes,
+  registerSourceRoutes,
 } from "@/routes";
 
 // Translation
@@ -38,11 +40,9 @@ import { createTranslationService } from "@/translation";
 import logger from "@/utils/logger";
 
 function createTranslateIoBackend(
-  options: TranslateIoBackendOptions
+  options: TranslateIoBackendOptions,
 ): TranslateIoBackendReturn {
   let server: http.Server | undefined;
-  let metadata: object[] = [];
-  const cache = new Map<string, Record<string, string>>();
   const config: TranslateIoBackendConfig = {
     server: {
       port: options.server.port || 4545,
@@ -64,11 +64,7 @@ function createTranslateIoBackend(
       languages: options.translations.languages,
       defaultLanguage:
         options.translations.defaultLanguage ||
-        (options.translations.languages.length > 0
-          ? options.translations.languages[0]
-          : options.translations.languages[0] || "en"),
-      parseTranslationData: options.translations.parseTranslationData,
-      parseMetadata: options.translations.parseMetadata || (() => []),
+        options.translations.languages[0],
     },
     translationService: {
       url: options.translationService.url,
@@ -84,24 +80,24 @@ function createTranslateIoBackend(
     },
   };
 
-  // Validate output directory
+  // ── Validate output directory ──────────────────────────────────────────────
   try {
     fs.accessSync(
       config.translations.outputDirectory,
-      fs.constants.W_OK | fs.constants.R_OK
+      fs.constants.W_OK | fs.constants.R_OK,
     );
   } catch (error: any) {
     if (error.code !== "ENOENT") {
       logger.error!(
         `Error accessing output directory: ${config.translations.outputDirectory}`,
-        error
+        error,
       );
       throw error;
     }
     fs.mkdirSync(config.translations.outputDirectory, { recursive: true });
   }
 
-  // Validate configuration
+  // ── Validate config ────────────────────────────────────────────────────────
   if (
     !config.translations.languages ||
     config.translations.languages.length === 0
@@ -121,8 +117,8 @@ function createTranslateIoBackend(
     if (!Object.keys(languageNames).includes(language)) {
       throw new Error(
         `Invalid language specified: ${language}. Supported languages are: ${Object.values(
-          languageNames
-        ).join(", ")}`
+          languageNames,
+        ).join(", ")}`,
       );
     }
   });
@@ -142,48 +138,40 @@ function createTranslateIoBackend(
     throw new Error("No payload function specified for translation service.");
   }
 
-  const testPayload = config.translationService.payload({}, "en", metadata);
-  if (!testPayload || typeof testPayload !== "object") {
+  if (typeof config.translationService.postProcessing !== "function") {
     throw new Error(
-      "The payload function must return an object for the translation service."
+      "No postProcessing function specified for translation service.",
     );
   }
 
-  // Prepare cache directory and load any existing caches
-  const cacheDir = path.join(config.translations.outputDirectory, "cache");
+  // ── Load source file ───────────────────────────────────────────────────────
+  let source: SourceFile = {};
   try {
-    fs.accessSync(cacheDir, fs.constants.R_OK | fs.constants.W_OK);
-  } catch (err: any) {
-    if (err.code !== "ENOENT") {
-      logger.error!("Error accessing cache directory:", err);
-    }
-    fs.mkdirSync(cacheDir, { recursive: true });
+    const raw = fs.readFileSync(config.translations.fromFile, "utf-8");
+    source = JSON.parse(raw) as SourceFile;
+    logger.info!(
+      `Loaded ${Object.keys(source).length} source keys from ${config.translations.fromFile}`,
+    );
+  } catch (error: any) {
+    logger.error!("Error loading source file:", error);
+    throw error;
   }
 
-  // Load per-language caches into in-memory map
-  for (const language of config.translations.languages) {
-    const cachePath = path.join(cacheDir, `${language}.json`);
-    if (fs.existsSync(cachePath)) {
-      try {
-        const content = fs.readFileSync(cachePath, "utf-8");
-        cache.set(language, JSON.parse(content));
-      } catch (err: any) {
-        logger.error!(`Failed to load cache for ${language}:`, err);
-        cache.set(language, {});
-      }
-    } else {
-      cache.set(language, {});
-    }
-  }
+  // Helper to persist the in-memory source back to fromFile
+  const persistSource = async (): Promise<void> => {
+    await fs.promises.writeFile(
+      config.translations.fromFile,
+      JSON.stringify(source, null, 2),
+      "utf-8",
+    );
+  };
 
+  // ── Express setup ──────────────────────────────────────────────────────────
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
-
-  // Middleware
   app.use(tracingMiddleware);
 
-  // Apply rate limiting if enabled
   if (config.server.rateLimit.enabled) {
     const rateLimiter = createRateLimitMiddleware({
       windowMs: config.server.rateLimit.windowMs,
@@ -193,54 +181,40 @@ function createTranslateIoBackend(
     app.use(rateLimiter.middleware);
   }
 
-  // Public endpoint
   app.get("/", (req, res) => res.send("Translate.io Backend is running."));
 
-  // Apply auth middleware to protected routes
+  // ── Auth ───────────────────────────────────────────────────────────────────
   const authMiddleware = basicAuthMiddleware(
     config.server.auth.username,
-    config.server.auth.password
+    config.server.auth.password,
   );
 
-  app.use("/languages", authMiddleware);
-  app.use("/languageMapping", authMiddleware);
-  app.use("/translate", authMiddleware);
-  app.use("/debug", authMiddleware);
-  app.use("/write", authMiddleware);
-  app.use("/read", authMiddleware);
+  const protectedPaths = [
+    "/languages",
+    "/languageMapping",
+    "/translate",
+    "/debug",
+    "/write",
+    "/read",
+    "/source",
+  ];
+  protectedPaths.forEach((p) => app.use(p, authMiddleware));
 
-  app.use("/write", productionBlock);
-  app.use("/debug", productionBlock);
-  app.use("/translate", productionBlock);
+  // These routes are blocked in production
+  const prodBlockPaths = ["/write", "/debug", "/translate", "/source"];
+  prodBlockPaths.forEach((p) => app.use(p, productionBlock));
 
-  // Load translations and metadata
-  let toTranslate: Record<string, string> = {};
-  try {
-    const data = fs.readFileSync(config.translations.fromFile, "utf-8");
-    toTranslate = config.translations.parseTranslationData(data);
-
-    // Parse metadata from the input file
-    metadata = config.translations.parseMetadata(data);
-    logger.info!(
-      `Loaded ${Object.keys(toTranslate).length} translation keys and ${
-        metadata.length
-      } metadata entries.`
-    );
-  } catch (error: any) {
-    logger.error!("Error loading translations:", error);
-    throw error;
-  }
-
-  // Register all routes
+  // ── Routes ─────────────────────────────────────────────────────────────────
   registerHealthRoutes(app);
   registerLanguagesRoutes(app, config);
-  registerTranslateRoutes(app, config, toTranslate, cache, cacheDir, metadata);
-  registerAsyncRoutes(app, config, cache, cacheDir, metadata);
-  registerDebugRoutes(app, config, cache);
-  registerWriteRoutes(app);
-  registerReadRoutes(app);
+  registerTranslateRoutes(app, config, source);
+  registerAsyncRoutes(app, config, source);
+  registerDebugRoutes(app, config);
+  registerWriteRoutes(app, config);
+  registerReadRoutes(app, config);
+  registerSourceRoutes(app, config, source, persistSource);
 
-  // Server lifecycle
+  // ── Server lifecycle ───────────────────────────────────────────────────────
   const startFn = (port: number) => () => {
     server = app.listen(port, () => {
       logger.info!(`Translate.io Backend is running on port ${port}.`);
@@ -249,7 +223,7 @@ function createTranslateIoBackend(
     server.on("error", (error: any) => {
       if (error.code === "EADDRINUSE") {
         logger.error!(
-          `Port ${port} is already in use. Retrying with next port.`
+          `Port ${port} is already in use. Retrying with next port.`,
         );
         startFn(port + 1)();
       } else {

@@ -13,12 +13,6 @@ const translateIo = createTranslateio({
     fromFile: "./translations.json",
     languages: ["en", "es", "fr"],
     defaultLanguage: "en",
-    parseTranslationData: (data: string) => {
-      return JSON.parse(data).translations || {};
-    },
-    parseMetadata: (data: string) => {
-      return JSON.parse(data).metadata || [];
-    },
   },
   translationService: {
     url: "https://api-free.deepl.com/v2/translate",
@@ -30,17 +24,23 @@ const translateIo = createTranslateio({
     method: "POST",
     contentType: "application/json",
     retries: 3,
-    payload: (translationData: string, toLanguage: string) => {
+    // translationData will be an array of { key, content } when batchProcessing is true
+    payload: (translationData, toLanguage) => {
+      const entries = Array.isArray(translationData)
+        ? translationData
+        : [translationData];
       return {
-        text: translationData,
-        target_lang: toLanguage,
+        text: entries.map((e) => e.content),
+        target_lang: toLanguage.toUpperCase(),
       };
     },
     batchProcessing: true,
-    postProcessing: (data: { text: string }[]) => {
-      return data.map((item) => ({
-        ...item,
-        text: item.text.replace(/<[^>]*>/g, ""), // Remove HTML tags
+    // DeepL returns { translations: [{ text: string }] }
+    // We need to map back to { key, content } using the original order
+    postProcessing: (data) => {
+      return (data.translations as { text: string }[]).map((item, i) => ({
+        key: String(i), // placeholder — real impl should preserve keys from payload
+        content: item.text,
       }));
     },
   },

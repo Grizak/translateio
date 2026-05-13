@@ -4,17 +4,16 @@ import {
   broadcastSSEEvent,
   translationQueue,
   setProcessingQueue,
+  processingQueue,
 } from "./sse";
-import { translateWithBatchingAndCache } from "@/translation";
+import { translateWithBatching } from "@/translation";
 import logger from "@/utils/logger";
 
 export async function processAsyncTranslationQueue(
   config: TranslateIoBackendConfig,
-  cache: Map<string, Record<string, string>>,
-  cacheDir: string,
-  metadata: object[]
+  outputDir: string,
 ) {
-  // Prevent concurrent processing
+  if (processingQueue) return;
   setProcessingQueue(true);
 
   while (translationQueue.length > 0) {
@@ -25,7 +24,6 @@ export async function processAsyncTranslationQueue(
     if (!request) continue;
 
     try {
-      // Notify clients that processing has started
       broadcastSSEEvent({
         type: "start",
         requestId,
@@ -35,21 +33,17 @@ export async function processAsyncTranslationQueue(
 
       request.status = "processing";
 
-      // Perform translation with caching
-      const result = await translateWithBatchingAndCache(
+      const result = await translateWithBatching(
         request.data,
         request.targetLanguage,
         config,
-        cache,
-        cacheDir,
-        metadata
+        outputDir,
       );
 
       request.result = result;
       request.status = "completed";
       request.completedAt = new Date();
 
-      // Notify clients of completion
       broadcastSSEEvent({
         type: "complete",
         requestId,

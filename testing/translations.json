@@ -1,1 +1,11 @@
-{}
+{
+  "welcome_message": {
+    "content": "Welcome to our app!"
+  },
+  "logout_button": {
+    "content": "Log out"
+  },
+  "settings_title": {
+    "content": "Settings"
+  }
+}

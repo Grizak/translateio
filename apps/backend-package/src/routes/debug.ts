@@ -6,14 +6,8 @@ import { setDebugVerbose } from "@/middleware/tracing";
 export const registerDebugRoutes = (
   app: express.Application,
   config: TranslateIoBackendConfig,
-  cache: Map<string, Record<string, string>>
 ) => {
   app.get("/debug/state", (req, res) => {
-    const cacheSummary = Array.from(cache.entries()).map(([lang, obj]) => ({
-      lang,
-      keys: Object.keys(obj || {}).length,
-    }));
-
     const statusCounts: Record<string, number> = {};
     for (const r of asyncRequests.values()) {
       statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
@@ -24,18 +18,10 @@ export const registerDebugRoutes = (
       queueLength: translationQueue.length,
       asyncRequestCount: asyncRequests.size,
       asyncStatusCounts: statusCounts,
-      cacheSummary,
       sseConnections: Array.from(sseConnections.entries()).map(
-        ([id, conns]) => ({ id, connections: conns.length })
+        ([id, conns]) => ({ id, connections: conns.length }),
       ),
     });
-  });
-
-  app.get("/debug/cache/:lang", (req, res) => {
-    const { lang } = req.params;
-    const c = cache.get(lang);
-    if (!c) return res.status(404).json({ error: "No cache for language" });
-    res.json(c);
   });
 
   app.get("/debug/queue", (req, res) => {

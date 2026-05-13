@@ -5,3 +5,4 @@ export { registerAsyncRoutes } from "./async";
 export { registerDebugRoutes } from "./debug";
 export { registerWriteRoutes } from "./writeTranslations";
 export { registerReadRoutes } from "./readTranslations";
+export { registerSourceRoutes } from "./source";

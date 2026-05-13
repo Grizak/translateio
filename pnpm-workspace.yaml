@@ -4,6 +4,7 @@ packages:
   - packages/*
   - testing
   - docs-frontend
+  - apps/website/*
 
 onlyBuiltDependencies:
   - electron

@@ -1,68 +1,57 @@
 import fs from "fs";
 import path from "path";
 import express from "express";
-import type { TranslateIoBackendConfig } from "@/types";
-import { createTranslationService, translateWithBatching } from "@/translation";
+import type { TranslateIoBackendConfig, SourceFile } from "@/types";
+import { translateWithBatching } from "@/translation";
 import logger from "@/utils/logger";
 
 export const registerTranslateRoutes = (
   app: express.Application,
   config: TranslateIoBackendConfig,
-  toTranslate: Record<string, string>,
-  cache: Map<string, Record<string, string>>,
-  cacheDir: string,
-  metadata: object[]
+  source: SourceFile,
 ) => {
-  async function translate(toLang: string) {
+  const outputDir = path.join(
+    config.translations.outputDirectory,
+    "translated",
+  );
+
+  // POST /translate/:toLang — trigger a translation run for one language
+  // Accepts optional ?write=true (default true) to persist the output file
+  // FIXME: Long-running — for large source files use the async route instead
+  app.post("/translate/:toLang", async (req, res) => {
+    const { toLang } = req.params;
+    const write = req.query.write !== "false";
+
     if (!config.translations.languages.includes(toLang)) {
-      return Promise.reject(new Error("Unsupported target language."));
+      return res
+        .status(400)
+        .json({ error: `Unsupported target language: ${toLang}` });
     }
 
     try {
-      const translated = await translateWithBatching(
-        toTranslate,
+      const result = await translateWithBatching(
+        source,
         toLang,
         config,
-        cache,
-        cacheDir,
-        metadata
+        outputDir,
       );
 
-      // Save the metadata for this language
-      const service = createTranslationService(config, metadata);
-      await service.setMetadata(toLang, metadata);
-
-      return translated;
-    } catch (error: any) {
-      logger.error!("Translation error:", error);
-      throw new Error("Translation failed.");
-    }
-  }
-
-  // FIXME: Remove before finalizing (request timeout suspected if translating many
-  //  translations are made at the same time)
-  app.get("/translate/:toLang", async (req, res) => {
-    const { toLang } = req.params;
-    const { write } = req.query;
-
-    try {
-      const translated = await translate(toLang);
-      res.json({ translations: translated });
-      if (write === "true") {
-        // Write translations to file
-        const outputDir = path.join(
-          config.translations.outputDirectory,
-          "translated"
-        );
+      if (write) {
         await fs.promises.mkdir(outputDir, { recursive: true });
         const outputPath = path.join(outputDir, `${toLang}.json`);
         await fs.promises.writeFile(
           outputPath,
-          JSON.stringify(translated, null, 2),
-          "utf-8"
+          JSON.stringify(result, null, 2),
+          "utf-8",
         );
         logger.info!(`Translations for ${toLang} written to ${outputPath}`);
       }
+
+      res.json({
+        language: toLang,
+        keys: Object.keys(result).length,
+        translations: result,
+      });
     } catch (error: any) {
       logger.error!("Translation error:", error);
       res

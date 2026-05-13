@@ -1,5 +1,2 @@
 export { createTranslationService } from "./service";
-export {
-  translateWithBatching,
-  translateWithBatchingAndCache,
-} from "./batching";
+export { translateWithBatching, markChangedEntries } from "./batching";
